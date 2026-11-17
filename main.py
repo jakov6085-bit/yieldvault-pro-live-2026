@@ -97,7 +97,7 @@ async def simulate_donations(app):
             donor_name = random.choice(DONATION_NAMES)
             logger.info(f"[SIM] Donation: {donor_name} +{sats} sats → Total: {CURRENT_RAISED:.8f} BTC")
 
-        # Pošalji pozitivnu poruku SVIM aktivnim korisnicima (ako imaš log)
+        # Pošalji pozitivnu poruku
         try:
             await app.application.bot.send_message(
                 chat_id=ADMIN_ID,
@@ -338,7 +338,7 @@ if __name__ == '__main__':
     app.add_handler(CommandHandler("donate", donate_cmd))
     app.add_handler(CommandHandler("projects", projects_cmd))
     app.add_handler(CommandHandler("stats", stats_cmd))
-    app.add_handler(CommandHandler("admin", admin))  # Tvoja tajna komanda
+    app.add_handler(CommandHandler("admin", admin))
 
     # Callbacks
     app.add_handler(CallbackQueryHandler(button_handler))
